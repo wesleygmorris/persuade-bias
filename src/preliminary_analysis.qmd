@@ -1,0 +1,41 @@
+---
+title: "Preliminary Analysis"
+date-modified: "today"
+subtitle: "Bias in PERSUADE"
+format: pdf
+code-fold: false
+code-overflow: wrap
+editor: 
+  markdown: 
+    wrap: 80
+---
+
+```{r, message = FALSE, warning = FALSE}
+library(lme4)
+library(stargazer) # LaTeX tables
+library(sjPlot)
+library(performance) # ICC
+library(tidyverse)
+df <- read.csv("../data/persuade_corpus.csv") %>% 
+  mutate(ell = str_replace(ell, " ", "")) %>% 
+  select(-c(full_text, X, assignment, source_text)) %>%
+  mutate_if(is.character, as.factor)
+```
+
+
+```{r}
+summary(df)
+```
+
+
+
+```{r}
+model.fixed <- lm(holistic_score_adjudicated ~ race_ethnicity + economically_disadvantaged + ell, data=df)
+model.rand <- lmer(holistic_score_adjudicated ~ race_ethnicity + economically_disadvantaged + ell*grade + student_disability_status + grade + (1|prompt_name), data=df)
+# summary(model)
+performance(model.fixed)
+performance(model.rand)
+summary(model.rand)
+tab_model(model.rand)
+```
+
