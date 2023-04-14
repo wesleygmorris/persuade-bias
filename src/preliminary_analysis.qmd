@@ -11,31 +11,176 @@ editor:
 ---
 
 ```{r, message = FALSE, warning = FALSE}
-library(lme4)
-library(stargazer) # LaTeX tables
 library(sjPlot)
+library(lme4)
+library(car) # level names in contrasts
+library(stargazer) # LaTeX tables
+library(emmeans)
 library(performance) # ICC
 library(tidyverse)
-df <- read.csv("../data/persuade_corpus.csv") %>% 
-  mutate(ell = str_replace(ell, " ", "")) %>% 
+
+df <- read.csv("../data/persuade_corpus.csv",
+               na.strings = c("", " ", "NA")) %>% 
   select(-c(full_text, X, assignment, source_text)) %>%
-  mutate_if(is.character, as.factor)
-```
+  mutate_if(is.character, as.factor) %>%
+  
+  # drop American Indian/Alaskan Native group because there are < 200 samples
+  filter(race_ethnicity != "American Indian/Alaskan Native") %>%
+  
+  # remove unused levels (American Indian)
+  droplevels() %>% 
+  
+  # simplify level and variable names
+  mutate(
+    race=fct_recode(race_ethnicity,
+                    asian="Asian/Pacific Islander",
+                    black="Black/African American", 
+                    hisp="Hispanic/Latino",
+                    other="Two or more races/Other",
+                    white="White")
+    ) %>% 
+  
+  # collapse NaNs into negative level of binary factors
+  mutate(
+    is_ell=fct_collapse(addNA(ell), Yes = "Yes", No = c("No", NA)),
+    is_disadvantaged=fct_collapse(addNA(economically_disadvantaged),
+                                  Yes = "Economically disadvantaged",
+                                  No = c("Not economically disadvantaged", NA)),
+    has_disability=fct_collapse(addNA(student_disability_status),
+                                  Yes = "Identified as having disability",
+                                  No = c("Not identified as having disability", NA))
+    ) %>%
+  
+  # set the first level, which will be used as "reference"
+  mutate(
+    is_disadvantaged=fct_relevel(is_disadvantaged, "No"),
+    has_disability=fct_relevel(has_disability, "No"),
+  )
 
-
-```{r}
 summary(df)
 ```
 
+```{r}
+eval_model <- function(mod) {
+  print(performance(mod))
+  print(tab_model(mod,
+                  p.adjust="HB",
+                  show.aic=TRUE,
+                  show.re.var=TRUE,
+                  # show.reflvl=TRUE,
+                  prefix.labels="varname"
+                  ))
+}
+```
+
+```{r}
+mod.null <-lmer(holistic_score_adjudicated ~ 1 + (1|prompt_name) + (1|source), data=df)
+eval_model(mod.null)
+```
+
+
+# Simple model with just race
+
+```{r}
+mod.race <-lmer(holistic_score_adjudicated
+                ~ race
+                + (1|prompt_name),
+                data=df,
+                contrasts = list(race = "contr.Sum")
+                )
+eval_model(mod.race)
+```
+
+# All fixed effects
+
+```{r}
+mod.all_fixed_effects <- lmer(holistic_score_adjudicated 
+                              ~ race
+                              + grade
+                              + is_disadvantaged
+                              + is_ell
+                              + has_disability 
+                              + source
+                              + gender
+                              + (1|prompt_name),
+                              data=df,
+                              contrasts = list(race = "contr.Sum")
+                              )
+eval_model(mod.all_fixed_effects)
+```
+
+# Search for interactions
+
+We drop grade because it was not significant, but we test for an interaction between grade and ell. We might expect interactions: race\*ses, race\*ell, and race\*disability.
+
+```{r}
+mod.interactions <- lmer(holistic_score_adjudicated 
+                         ~ race
+                         + is_disadvantaged
+                         + is_ell
+                         + has_disability 
+                         + source
+                         + gender
+                         + race*is_ell
+                         + race*is_disadvantaged
+                         + race*has_disability
+                         + race*source
+                         # + race*gender # not sig.
+                         + (1|prompt_name),
+                         data=df
+                         )
+eval_model(mod.interactions)
+```
+
+# Search for random slopes
+
+We drop the interaction between race and ell. We create a random slope for ell status.
+
+```{r}
+mod.rand_slope <- lmer(holistic_score_adjudicated ~ is_male # fixed
+                       + grade*is_ell + race_ethnicity*is_disadvantaged + race_ethnicity*has_disability # interactions
+                       + (1|source) + (is_ell|task:prompt_name), # random
+                       data=df,
+                       contrasts = list(
+                         race_ethnicity = "contr.Sum")
+                       )
+eval_model(mod.rand_slope)
+```
+
+
+# Create Contrasts for Final Model
+
+This contrast negatively affects AIC, but I find it more interpretable. It may be better to estimate marginal means in a post-hoc test with emmeans.
+
+```{r}
+mod.contrast <- lmer(holistic_score_adjudicated ~ is_male # fixed
+                       + race_ethnicity*is_disadvantaged + race_ethnicity*has_disability + is_ell*grade # interactions
+                       + (1|source) + (is_ell|task:prompt_name), # random
+                       data=df,
+                       contrasts = list(race_ethnicity = "contr.Sum")
+                       )
+eval_model(mod.contrast)
+```
 
 
 ```{r}
-model.fixed <- lm(holistic_score_adjudicated ~ race_ethnicity + economically_disadvantaged + ell, data=df)
-model.rand <- lmer(holistic_score_adjudicated ~ race_ethnicity + economically_disadvantaged + ell*grade + student_disability_status + grade + (1|prompt_name), data=df)
-# summary(model)
-performance(model.fixed)
-performance(model.rand)
-summary(model.rand)
-tab_model(model.rand)
+emmeans(mod.rand_slope, "race_ethnicity", mode = "asymp")
+```
+
+```{r}
+
+labels <- c("(Intercept)", "gender (male)", "American Indian/Alaskan Native", "Asian/Pacific Islander", "Black/African American", "Hispanic/Latino", "Two or more races/Other", "Economically disadvantaged", "Identified as having disability", "ELL", "grade", "Asian/Pacific Islander:Economically disadvantaged", "Black/African American:Economically disadvantaged", "Hispanic/Latino:Economically disadvantaged", "Two or more races/Other:Economically disadvantaged", "White:Economically disadvantaged", "Asian/Pacific Islander:Identified as having disability", "Black/African American:Identified as having disability", "Hispanic/Latino:Identified as having disability", "Two or more races/Other:Identified as having disability", "White:Identified as having disability", "ELL:grade")
+
+tab_model(mod.contrast, 
+          pred.labels = labels,
+          p.adjust = "BH",
+          file=paste0("../results/RQ1.html")
+          )
+
+mod <- summary(mod.rand_slope)
+
+coefs <- mod$coefficients
+
+print(rownames(coefs))
 ```
 

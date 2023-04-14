@@ -1,0 +1,149 @@
+---
+title: "Multi-level Model"
+date-modified: "today"
+subtitle: "Bias in PERSUADE"
+format: pdf
+code-fold: false
+code-overflow: wrap
+editor: 
+  markdown: 
+    wrap: 80
+---
+
+```{r, message = FALSE, warning = FALSE}
+library(sjPlot)
+library(lme4)
+library(car) # level names in contrasts
+library(stargazer) # LaTeX tables
+library(emmeans)
+library(performance) # ICC
+library(tidyverse)
+library(forcats)
+
+dfp <- read.csv("../data/persuade-predictions-long.csv",
+               na.strings = c("", " ", "NA")) %>% 
+  select(-c(full_text, X, assignment, source_text)) %>%
+  mutate_if(is.character, as.factor) %>%
+  
+  # drop American Indian/Alaskan Native group because there are < 200 samples
+  filter(race_ethnicity != "American Indian/Alaskan Native") %>%
+  
+  # remove unused levels (American Indian)
+  droplevels() %>% 
+  
+  # simplify level and variable names
+  mutate(
+    trf=fct_recode(model,
+                   black="baa_pred",
+                   ctrl="control_pred",
+                   hisp="hl_pred",
+                   white="w_pred"),
+    race=fct_recode(race_ethnicity,
+                    asian="Asian/Pacific Islander",
+                    black="Black/African American", 
+                    hisp="Hispanic/Latino",
+                    other="Two or more races/Other",
+                    white="White")
+    ) %>% 
+  
+  # calculate root mean squared error
+  mutate(rmse=sqrt(squared_error)) %>% 
+  
+  # collapse NaNs into negative level of binary factors
+  mutate(
+    is_ell=fct_collapse(addNA(ell), Yes = "Yes", No = c("No", NA)),
+    is_disadvantaged=fct_collapse(addNA(economically_disadvantaged),
+                                  Yes = "Economically disadvantaged",
+                                  No = c("Not economically disadvantaged", NA)),
+    has_disability=fct_collapse(addNA(student_disability_status),
+                                  Yes = "Identified as having disability",
+                                  No = c("Not identified as having disability", NA))
+    ) %>%
+  
+  # set the first level, which will be used as "reference"
+  mutate(
+    is_disadvantaged=fct_relevel(is_disadvantaged, "No"),
+    has_disability=fct_relevel(has_disability, "No"),
+    trf=fct_relevel(trf, "ctrl")
+  )
+
+
+summary(dfp)
+```
+
+```{r}
+dfw <-dfp %>%
+  mutate(model =
+           fct_recode(
+             model,
+             black = "baa_pred",
+             ctrl = "control_pred",
+             hisp = "hl_pred",
+             white = "w_pred"
+             )
+         ) %>% 
+  pivot_wider(
+    names_from = model,
+    values_from = c(prediction, pred_error, rmse, squared_error)
+    )
+```
+
+
+```{r}
+
+coef_labs = c("(Intercept)",
+              "Gender (male)",
+              "ELL",
+              "Economically disadvantaged",
+              "Identified as having disability",
+              # "Grade",
+              "Asian/Pacific Islander",
+              "Black/African American",
+              "Hispanic/Latino",
+              "Two or more races/Other"
+              # "Asian/Pacific Islander x ELL",
+              # "Black/African American x ELL",
+              # "Hispanic/Latino x ELL",
+              # "Two or more races/Other x ELL"
+              )
+
+for (model in c("baa_pred", "hl_pred", "w_pred", "control_pred")) {
+  mod.tmp <- lmer(pred_error ~ gender + is_ell + is_disadvantaged + has_disability + race_ethnicity
+                   + (1|source) + (1|task:prompt_name), # random
+                   data=dfp[dfp$model == model, ],
+                   contrasts = list(race_ethnicity = "contr.Sum")
+                 )
+  
+  print(tab_model(mod.tmp,
+            show.aic=TRUE,
+            p.adjust = "BH",
+            pred.labels=coef_labs,
+            file=paste0("../results/", model, ".html")
+            ))
+  
+}
+```
+
+```{r}
+
+# binary predictors
+fit <- lmer(
+  pred_error
+  ~ gender + race + grade
+  + is_ell + is_disadvantaged + has_disability
+  + trf*race + trf*is_ell + trf*is_disadvantaged + trf*has_disability
+  + (is_ell | essay_id ), # random
+  data=dfp,
+  contrasts = list(race = "contr.Sum")
+)
+
+summary(fit)
+
+tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
+```
+
+```{r}
+plot(emmeans(fit, "race ~ trf", mode="asymp"), comparisons = TRUE)
+
+emmip(fit, trf ~ has_disability, mode="asymp", style = "factor")
+```
