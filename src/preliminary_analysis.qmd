@@ -57,6 +57,11 @@ df <- read.csv("../data/persuade_corpus.csv",
     has_disability=fct_relevel(has_disability, "No"),
   )
 
+# configure contrasts for race and source
+options(decorate.contr.Sum = c("", ""))
+contrasts(df$race) = contr.Sum(levels(df$race))
+contrasts(df$source) = contr.Sum(levels(df$source))
+
 summary(df)
 ```
 
@@ -74,7 +79,7 @@ eval_model <- function(mod) {
 ```
 
 ```{r}
-mod.null <-lmer(holistic_score_adjudicated ~ 1 + (1|prompt_name) + (1|source), data=df)
+mod.null <-lmer(holistic_score_adjudicated ~ 1 + (1|prompt_name), data=df)
 eval_model(mod.null)
 ```
 
@@ -84,9 +89,8 @@ eval_model(mod.null)
 ```{r}
 mod.race <-lmer(holistic_score_adjudicated
                 ~ race
-                + (1|prompt_name),
-                data=df,
-                contrasts = list(race = "contr.Sum")
+                + (race|prompt_name),
+                data=df
                 )
 eval_model(mod.race)
 ```
@@ -100,11 +104,10 @@ mod.all_fixed_effects <- lmer(holistic_score_adjudicated
                               + is_disadvantaged
                               + is_ell
                               + has_disability 
-                              + source
+                              # + source # slightly improves model fit, but is not of interest
                               + gender
                               + (1|prompt_name),
-                              data=df,
-                              contrasts = list(race = "contr.Sum")
+                              data=df
                               )
 eval_model(mod.all_fixed_effects)
 ```
@@ -119,13 +122,19 @@ mod.interactions <- lmer(holistic_score_adjudicated
                          + is_disadvantaged
                          + is_ell
                          + has_disability 
-                         + source
                          + gender
+                         # + race*is_disadvantaged # increases AIC
                          + race*is_ell
-                         + race*is_disadvantaged
-                         + race*has_disability
-                         + race*source
-                         # + race*gender # not sig.
+                         # + race*has_disability # increases AIC
+                         # + race*source # increases AIC
+                         # + race*gender # increases AIC
+                         # + race*grade # increases AIC
+                         + is_disadvantaged*has_disability
+                         + is_disadvantaged*is_ell
+                         + has_disability*is_ell
+                         # + gender*has_disability # increases AIC
+                         # + gender*is_disadvantaged # increases AIC
+                         # + gender*is_ell # small decrease (-1) to AIC
                          + (1|prompt_name),
                          data=df
                          )
@@ -134,53 +143,40 @@ eval_model(mod.interactions)
 
 # Search for random slopes
 
-We drop the interaction between race and ell. We create a random slope for ell status.
+There are no good random slopes.
 
 ```{r}
-mod.rand_slope <- lmer(holistic_score_adjudicated ~ is_male # fixed
-                       + grade*is_ell + race_ethnicity*is_disadvantaged + race_ethnicity*has_disability # interactions
-                       + (1|source) + (is_ell|task:prompt_name), # random
-                       data=df,
-                       contrasts = list(
-                         race_ethnicity = "contr.Sum")
-                       )
-eval_model(mod.rand_slope)
-```
-
-
-# Create Contrasts for Final Model
-
-This contrast negatively affects AIC, but I find it more interpretable. It may be better to estimate marginal means in a post-hoc test with emmeans.
-
-```{r}
-mod.contrast <- lmer(holistic_score_adjudicated ~ is_male # fixed
-                       + race_ethnicity*is_disadvantaged + race_ethnicity*has_disability + is_ell*grade # interactions
-                       + (1|source) + (is_ell|task:prompt_name), # random
-                       data=df,
-                       contrasts = list(race_ethnicity = "contr.Sum")
-                       )
-eval_model(mod.contrast)
+mod.final <- mod.interactions
 ```
 
 
 ```{r}
-emmeans(mod.rand_slope, "race_ethnicity", mode = "asymp")
+emmip(mod.final, race~is_ell, mode = "asymp")
+emmip(mod.final, is_disadvantaged~has_disability, mode = "asymp")
+emmip(mod.final, is_disadvantaged~is_ell, mode = "asymp")
+emmip(mod.final, has_disability~is_ell, mode = "asymp")
 ```
 
 ```{r}
+coefs <- summary(mod.final)$coefficients
+cat(rownames(coefs), sep="\", \"")
+labels <- c("(Intercept)", "Asian/Pacific Islander", "Black/African American", "Hispanic/Latino", "Two or more races/Other", "Economically disadvantaged", "English language learner", "Identified as having disability", "Male", "Asian/Pacific Islander:English language learner", "Black/African American:English language learner", "Hispanic/Latino:English language learner", "Two or more races/Other:English language learner", "Economically disadvantaged:Identified as having disability", "English language learner:Economically disadvantaged", "English language learner:Identified as having disability", "English language learner:Male")
 
-labels <- c("(Intercept)", "gender (male)", "American Indian/Alaskan Native", "Asian/Pacific Islander", "Black/African American", "Hispanic/Latino", "Two or more races/Other", "Economically disadvantaged", "Identified as having disability", "ELL", "grade", "Asian/Pacific Islander:Economically disadvantaged", "Black/African American:Economically disadvantaged", "Hispanic/Latino:Economically disadvantaged", "Two or more races/Other:Economically disadvantaged", "White:Economically disadvantaged", "Asian/Pacific Islander:Identified as having disability", "Black/African American:Identified as having disability", "Hispanic/Latino:Identified as having disability", "Two or more races/Other:Identified as having disability", "White:Identified as having disability", "ELL:grade")
+```
 
-tab_model(mod.contrast, 
+
+```{r}
+
+tab_model(mod.final, 
+          title = "Essay Scores Regressed on Demographic Variables",
+          dv.labels = "Holistic Score",
           pred.labels = labels,
+          emph.p = TRUE,
           p.adjust = "BH",
-          file=paste0("../results/RQ1.html")
+          # show.reflvl=TRUE,
+          show.re.var=TRUE,
+          file="../results/RQ1.html"
           )
 
-mod <- summary(mod.rand_slope)
-
-coefs <- mod$coefficients
-
-print(rownames(coefs))
 ```
 
