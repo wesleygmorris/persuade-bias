@@ -68,76 +68,77 @@ dfp <- read.csv("../data/persuade-predictions-long.csv",
   )
 
 
+# configure contrasts for race and source
+options(decorate.contr.Sum = c("", ""))
+contrasts(dfp$race) = contr.Sum(levels(dfp$race))
+contrasts(dfp$source) = contr.Sum(levels(dfp$source))
+
 summary(dfp)
 ```
+## Model from Research Question 1
+
+Just adding in transformer model as a predictor and a random intercept for essay ID. This model has poor fit, with many useless parameters. Prompt_name is no longer useful as a grouping variable, so we can drop it.
 
 ```{r}
-dfw <-dfp %>%
-  mutate(model =
-           fct_recode(
-             model,
-             black = "baa_pred",
-             ctrl = "control_pred",
-             hisp = "hl_pred",
-             white = "w_pred"
-             )
-         ) %>% 
-  pivot_wider(
-    names_from = model,
-    values_from = c(prediction, pred_error, rmse, squared_error)
-    )
+mod.rq1 <- lmer(pred_error 
+                ~ trf
+                + gender
+                + race*is_ell
+                + is_disadvantaged*has_disability
+                + is_disadvantaged*is_ell
+                + has_disability*is_ell
+                + (1|prompt_name)
+                + (1|essay_id),
+                data=dfp
+                )
+tab_model(mod.rq1, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
 ```
 
+## Tear-down
+We would be left with very little in the model.
 
 ```{r}
+fit <- lmer(pred_error
+            ~ trf
+            # + race # increases AIC
+            # + source # increases AIC
+            # + is_disadvantaged # increases AIC
+            + is_ell
+            + has_disability
+            # + gender # increases AIC
+            # + race*is_disadvantaged # increases AIC
+            # + race*is_ell # increases AIC
+            # + race*has_disability # increases AIC
+            # + race*source # increases AIC
+            # + race*gender # increases AIC
+            # + race*grade # increases AIC
+            # + is_disadvantaged*has_disability # increases AIC
+            # + is_disadvantaged*is_ell # increases AIC
+            # + has_disability*is_ell # increases AIC
+            # + gender*has_disability # increases AIC
+            # + gender*is_disadvantaged # increases AIC
+            # + gender*is_ell # small decrease (-1) to AIC
+            + (1 | essay_id),
+            data=dfp
+            )
 
-coef_labs = c("(Intercept)",
-              "Gender (male)",
-              "ELL",
-              "Economically disadvantaged",
-              "Identified as having disability",
-              # "Grade",
-              "Asian/Pacific Islander",
-              "Black/African American",
-              "Hispanic/Latino",
-              "Two or more races/Other"
-              # "Asian/Pacific Islander x ELL",
-              # "Black/African American x ELL",
-              # "Hispanic/Latino x ELL",
-              # "Two or more races/Other x ELL"
-              )
-
-for (model in c("baa_pred", "hl_pred", "w_pred", "control_pred")) {
-  mod.tmp <- lmer(pred_error ~ gender + is_ell + is_disadvantaged + has_disability + race_ethnicity
-                   + (1|source) + (1|task:prompt_name), # random
-                   data=dfp[dfp$model == model, ],
-                   contrasts = list(race_ethnicity = "contr.Sum")
-                 )
-  
-  print(tab_model(mod.tmp,
-            show.aic=TRUE,
-            p.adjust = "BH",
-            pred.labels=coef_labs,
-            file=paste0("../results/", model, ".html")
-            ))
-  
-}
+tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
 ```
 
+## Build-up: Interactions
+
+While race did not help model fit on its own, its interaction with transformer model substantially improves model fit.
+
 ```{r}
-
-# binary predictors
-fit <- lmer(
-  pred_error
-  ~ gender + race + grade
-  + is_ell + is_disadvantaged + has_disability
-  + trf*race + trf*is_ell + trf*is_disadvantaged + trf*has_disability
-  + (is_ell | essay_id ), # random
-  data=dfp,
-  contrasts = list(race = "contr.Sum")
-)
-
-summary(fit)
+fit <- lmer(pred_error
+            ~ trf
+            + trf*race
+            + trf*is_ell
+            + trf*has_disability
+            + trf*is_disadvantaged
+            + (1 | essay_id),
+            data=dfp
+            )
 
 tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
 ```
