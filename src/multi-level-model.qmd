@@ -28,16 +28,16 @@ dfp <- read.csv("../data/persuade-predictions-long.csv",
   # drop American Indian/Alaskan Native group because there are < 200 samples
   filter(race_ethnicity != "American Indian/Alaskan Native") %>%
   
-  # remove unused levels (American Indian)
+  # remove unused levels (American Indian/Alaskan Native)
   droplevels() %>% 
   
   # simplify level and variable names
   mutate(
-    trf=fct_recode(model,
-                   black="baa_pred",
-                   ctrl="control_pred",
-                   hisp="hl_pred",
-                   white="w_pred"),
+    Transformer=fct_recode(model,
+                   Black="baa_pred",
+                   Control="control_pred",
+                   Hispanic="hl_pred",
+                   White="w_pred"),
     race=fct_recode(race_ethnicity,
                     asian="Asian/Pacific Islander",
                     black="Black/African American", 
@@ -47,24 +47,40 @@ dfp <- read.csv("../data/persuade-predictions-long.csv",
     ) %>% 
   
   # calculate root mean squared error
-  mutate(rmse=sqrt(squared_error)) %>% 
+  mutate(rmse=sqrt(squared_error)) %>%
+  
+  # calculate percent error
+  mutate(percent_error = (pred_error/holistic_score_adjudicated)*100) %>% 
   
   # collapse NaNs into negative level of binary factors
   mutate(
     is_ell=fct_collapse(addNA(ell), Yes = "Yes", No = c("No", NA)),
     is_disadvantaged=fct_collapse(addNA(economically_disadvantaged),
                                   Yes = "Economically disadvantaged",
-                                  No = c("Not economically disadvantaged", NA)),
+                                  No = c("Not economically disadvantaged",
+                                         NA)
+                                  ),
     has_disability=fct_collapse(addNA(student_disability_status),
-                                  Yes = "Identified as having disability",
-                                  No = c("Not identified as having disability", NA))
+                                Yes = "Identified as having disability",
+                                No = c("Not identified as having disability",
+                                       NA)
+                                )
     ) %>%
   
   # set the first level, which will be used as "reference"
   mutate(
     is_disadvantaged=fct_relevel(is_disadvantaged, "No"),
     has_disability=fct_relevel(has_disability, "No"),
-    trf=fct_relevel(trf, "ctrl")
+    Transformer=fct_relevel(Transformer, "Control")
+  ) %>% 
+  
+  mutate(
+    Direction = case_when(
+      pred_error >= 0 ~ "Positive",
+      pred_error < 0 ~ "Negative"
+      ),
+    Direction = factor(Direction, levels=c("Positive","Negative")
+                       )
   )
 
 
@@ -75,6 +91,26 @@ contrasts(dfp$source) = contr.Sum(levels(dfp$source))
 
 summary(dfp)
 ```
+## Summary statistics
+
+```{r}
+dfp %>%
+  filter(trf == "ctrl") %>%
+  summarize(
+    Score = mean(holistic_score_adjudicated),
+    N = n(),
+    # ELLs = sum(as.numeric(is_ell)),
+    # Disability = sum(as.numeric(has_disability)),
+    # Disadvantaged = sum(as.numeric(is_disadvantaged)),
+    .by=c(race_ethnicity, is_ell)#, has_disability, is_disadvantaged)
+    ) %>% 
+  arrange(race_ethnicity, is_ell)#, has_disability, is_disadvantaged)
+
+```
+
+
+
+
 ## Model from Research Question 1
 
 Just adding in transformer model as a predictor and a random intercept for essay ID. This model has poor fit, with many useless parameters. Prompt_name is no longer useful as a grouping variable, so we can drop it.
@@ -94,11 +130,65 @@ mod.rq1 <- lmer(pred_error
 tab_model(mod.rq1, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
 ```
 
+## Save Table
+
+```{r}
+coefs <- summary(fit)$coefficients
+cat(rownames(coefs), sep="\", \"")
+
+labels <- c("(Intercept)",
+            "Transformer[Black]",
+            "Transformer[Hispanic]",
+            "Transformer[White]",
+            "Black/African American",
+            "Hispanic/Latino",
+            "Two or more races/Other",
+            "White",
+            "English language learner",
+            "Identified as having disability",
+            "Economically disadvantaged",
+            "Transformer[Black]:Black/African American",
+            "Transformer[Hispanic]:Black/African American",
+            "Transformer[White]:Black/African American",
+            "Transformer[Black]:Hispanic/Latino",
+            "Transformer[Hispanic]:Hispanic/Latino",
+            "Transformer[White]:Hispanic/Latino",
+            "Transformer[Black]:Two or more races/Other",
+            "Transformer[Hispanic]:Two or more races/Other",
+            "Transformer[White]:Two or more races/Other",
+            "Transformer[Black]:White",
+            "Transformer[Hispanic]:White",
+            "Transformer[White]:White",
+            "Transformer[Black]:English language learner",
+            "Transformer[Hispanic]:English language learner",
+            "Transformer[White]:English language learner",
+            "Transformer[Black]:Identified as having disability",
+            "Transformer[Hispanic]:Identified as having disability",
+            "Transformer[White]:Identified as having disability",
+            "Transformer[Black]:Economically disadvantaged",
+            "Transformer[Hispanic]:Economically disadvantaged",
+            "Transformer[White]:Economically disadvantaged")
+```
+```{r}
+tab_model(fit,
+          title = "Prediction Error Regressed on Demographic Variables",
+          dv.labels = "Prediction Error",
+          show.aic=TRUE,
+          show.reflvl=TRUE,
+          prefix.labels="varname",
+          p.adjust = "BH",
+          pred.labels=labels,
+          file = "../results/RQ2.html")
+```
+
+
+
 ## Tear-down
+
 We would be left with very little in the model.
 
 ```{r}
-fit <- lmer(pred_error
+fit.min <- lmer(pred_error
             ~ trf
             # + race # increases AIC
             # + source # increases AIC
@@ -122,29 +212,95 @@ fit <- lmer(pred_error
             data=dfp
             )
 
-tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
+tab_model(fit.min, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
 ```
 
 ## Build-up: Interactions
 
-While race did not help model fit on its own, its interaction with transformer model substantially improves model fit.
+While race did not help model fit on its own, its interaction with transformer model substantially improves model fit. The same pattern holds for interactions between transformer model and other demographic variables.
 
 ```{r}
 fit <- lmer(pred_error
+            ~ Transformer
+            + Transformer*race_ethnicity
+            + Transformer*is_ell
+            + Transformer*has_disability
+            + Transformer*is_disadvantaged
+            + (1 | essay_id),
+            REML = TRUE,
+            data=dfp
+            )
+
+tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
+
+```
+
+## Deviance Tests
+
+These require non-restricted ML estimations.
+
+```{r}
+fit.ml <- lmer(pred_error
+            ~ trf
+            + trf*race
+            # + trf*is_ell
+            + trf*has_disability
+            + trf*is_disadvantaged
+            + (1 | essay_id),
+            REML = FALSE,
+            data=dfp
+            )
+
+fit.ell <- lmer(pred_error
             ~ trf
             + trf*race
             + trf*is_ell
             + trf*has_disability
             + trf*is_disadvantaged
             + (1 | essay_id),
+            REML = FALSE,
             data=dfp
             )
 
-tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
+1-pchisq(deviance(fit.ml) - deviance(fit.ell), df=2)
 ```
+## RMSE
+
+RMSE is more interpretable. Possibly a separate research questioN?
 
 ```{r}
-plot(emmeans(fit, "race ~ trf", mode="asymp"), comparisons = TRUE)
+fit.rmse <- lmer(rmse
+            ~ Transformer
+            + Transformer*race_ethnicity
+            + Transformer*is_ell
+            # + Transformer*has_disability
+            + Transformer*is_disadvantaged
+            + (1 | essay_id),
+            REML = TRUE,
+            data=dfp
+            )
 
-emmip(fit, trf ~ has_disability, mode="asymp", style = "factor")
+tab_model(fit.rmse, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
+
+```
+
+
+## Interaction Plots
+
+```{r}
+# c("Asian/Pacific Islander",
+#   "Black/African American",
+#                "Hispanic/Latino",
+#                "Two or more races/Other",
+#                "White")
+
+emmip(fit, race_ethnicity ~ Transformer,
+      mode="asymp",
+      type = "scale",
+      style = "factor",
+      tlab = "Race/Ethnicity",
+      ylab = "Prediction Error",
+      xlab = "Data used to Train Automatic Scoring System"
+)
+# ggsave("../results/transformer_race.png")
 ```
