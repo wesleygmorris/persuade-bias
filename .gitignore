@@ -1,0 +1,8 @@
+**/*.ipynb_checkpoints/
+data/
+bin/
+src/__*
+renv/
+.Rprofile
+*.Rproj
+.Rproj.user

@@ -68,13 +68,13 @@ summary(df)
 ```{r}
 eval_model <- function(mod) {
   print(performance(mod))
-  print(tab_model(mod,
-                  p.adjust="HB",
-                  show.aic=TRUE,
-                  show.re.var=TRUE,
-                  # show.reflvl=TRUE,
-                  prefix.labels="varname"
-                  ))
+  # print(tab_model(mod,
+  #                 p.adjust="HB",
+  #                 show.aic=TRUE,
+  #                 show.re.var=TRUE,
+  #                 # show.reflvl=TRUE,
+  #                 prefix.labels="varname"
+  #                 ))
 }
 ```
 
@@ -165,8 +165,7 @@ labels <- c("(Intercept)", "Asian/Pacific Islander", "Black/African American", "
 ```
 
 
-```{r}
-
+```{r, eval=FALSE}
 tab_model(mod.final, 
           title = "Essay Scores Regressed on Demographic Variables",
           dv.labels = "Holistic Score",
@@ -177,6 +176,5 @@ tab_model(mod.final,
           show.re.var=TRUE,
           file="../results/RQ1.html"
           )
-
 ```
 

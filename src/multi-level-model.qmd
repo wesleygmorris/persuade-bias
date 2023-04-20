@@ -95,16 +95,16 @@ summary(dfp)
 
 ```{r}
 dfp %>%
-  filter(trf == "ctrl") %>%
+  filter(Transformer == "Control") %>%
   summarize(
     Score = mean(holistic_score_adjudicated),
     N = n(),
-    # ELLs = sum(as.numeric(is_ell)),
-    # Disability = sum(as.numeric(has_disability)),
-    # Disadvantaged = sum(as.numeric(is_disadvantaged)),
-    .by=c(race_ethnicity, is_ell)#, has_disability, is_disadvantaged)
+    ELLs = sum(as.numeric(is_ell)),
+    Disability = sum(as.numeric(has_disability)),
+    Disadvantaged = sum(as.numeric(is_disadvantaged)),
+    .by=c(race_ethnicity)
     ) %>% 
-  arrange(race_ethnicity, is_ell)#, has_disability, is_disadvantaged)
+  arrange(race_ethnicity)
 
 ```
 
@@ -115,9 +115,9 @@ dfp %>%
 
 Just adding in transformer model as a predictor and a random intercept for essay ID. This model has poor fit, with many useless parameters. Prompt_name is no longer useful as a grouping variable, so we can drop it.
 
-```{r}
+```{r, eval=FALSE}
 mod.rq1 <- lmer(pred_error 
-                ~ trf
+                ~ Transformer
                 + gender
                 + race*is_ell
                 + is_disadvantaged*has_disability
@@ -130,66 +130,13 @@ mod.rq1 <- lmer(pred_error
 tab_model(mod.rq1, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
 ```
 
-## Save Table
-
-```{r}
-coefs <- summary(fit)$coefficients
-cat(rownames(coefs), sep="\", \"")
-
-labels <- c("(Intercept)",
-            "Transformer[Black]",
-            "Transformer[Hispanic]",
-            "Transformer[White]",
-            "Black/African American",
-            "Hispanic/Latino",
-            "Two or more races/Other",
-            "White",
-            "English language learner",
-            "Identified as having disability",
-            "Economically disadvantaged",
-            "Transformer[Black]:Black/African American",
-            "Transformer[Hispanic]:Black/African American",
-            "Transformer[White]:Black/African American",
-            "Transformer[Black]:Hispanic/Latino",
-            "Transformer[Hispanic]:Hispanic/Latino",
-            "Transformer[White]:Hispanic/Latino",
-            "Transformer[Black]:Two or more races/Other",
-            "Transformer[Hispanic]:Two or more races/Other",
-            "Transformer[White]:Two or more races/Other",
-            "Transformer[Black]:White",
-            "Transformer[Hispanic]:White",
-            "Transformer[White]:White",
-            "Transformer[Black]:English language learner",
-            "Transformer[Hispanic]:English language learner",
-            "Transformer[White]:English language learner",
-            "Transformer[Black]:Identified as having disability",
-            "Transformer[Hispanic]:Identified as having disability",
-            "Transformer[White]:Identified as having disability",
-            "Transformer[Black]:Economically disadvantaged",
-            "Transformer[Hispanic]:Economically disadvantaged",
-            "Transformer[White]:Economically disadvantaged")
-```
-```{r}
-tab_model(fit,
-          title = "Prediction Error Regressed on Demographic Variables",
-          dv.labels = "Prediction Error",
-          show.aic=TRUE,
-          show.reflvl=TRUE,
-          prefix.labels="varname",
-          p.adjust = "BH",
-          pred.labels=labels,
-          file = "../results/RQ2.html")
-```
-
-
-
 ## Tear-down
 
 We would be left with very little in the model.
 
-```{r}
+```{r, eval=FALSE}
 fit.min <- lmer(pred_error
-            ~ trf
+            ~ Transformer
             # + race # increases AIC
             # + source # increases AIC
             # + is_disadvantaged # increases AIC
@@ -222,7 +169,7 @@ While race did not help model fit on its own, its interaction with transformer m
 ```{r}
 fit <- lmer(pred_error
             ~ Transformer
-            + Transformer*race_ethnicity
+            + Transformer*race
             + Transformer*is_ell
             + Transformer*has_disability
             + Transformer*is_disadvantaged
@@ -235,28 +182,80 @@ tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjus
 
 ```
 
+## Save Table
+
+```{r, eval=FALSE}
+coefs <- summary(fit)$coefficients
+cat(rownames(coefs), sep="\", \"")
+
+labels <- c("(Intercept)",
+            "Transformer[Black]",
+            "Transformer[Hispanic]",
+            "Transformer[White]",
+            "Asian/Pacific Islander",
+            "Black/African American",
+            "Hispanic/Latino",
+            "Two or more races/Other",
+            "English language learner",
+            "Identified as having disability",
+            "Economically disadvantaged",
+            "Transformer[Black]:Asian/Pacific Islander",
+            "Transformer[Hispanic]:Asian/Pacific Islander",
+            "Transformer[White]:Asian/Pacific Islander",
+            "Transformer[Black]:Black/African American",
+            "Transformer[Hispanic]:Black/African American",
+            "Transformer[White]:Black/African American",
+            "Transformer[Black]:Hispanic/Latino",
+            "Transformer[Hispanic]:Hispanic/Latino",
+            "Transformer[White]:Hispanic/Latino",
+            "Transformer[Black]:Two or more races/Other",
+            "Transformer[Hispanic]:Two or more races/Other",
+            "Transformer[White]:Two or more races/Other",
+            "Transformer[Black]:English language learner",
+            "Transformer[Hispanic]:English language learner",
+            "Transformer[White]:English language learner",
+            "Transformer[Black]:Identified as having disability",
+            "Transformer[Hispanic]:Identified as having disability",
+            "Transformer[White]:Identified as having disability",
+            "Transformer[Black]:Economically disadvantaged",
+            "Transformer[Hispanic]:Economically disadvantaged",
+            "Transformer[White]:Economically disadvantaged")
+```
+
+```{r, eval=FALSE}
+tab_model(fit,
+          title = "Prediction Error Regressed on Demographic Variables",
+          dv.labels = "Prediction Error",
+          show.aic=TRUE,
+          show.reflvl=TRUE,
+          prefix.labels="varname",
+          p.adjust = "BH",
+          pred.labels=labels,
+          file = "../results/RQ2.html")
+```
+
 ## Deviance Tests
 
 These require non-restricted ML estimations.
 
 ```{r}
 fit.ml <- lmer(pred_error
-            ~ trf
-            + trf*race
-            # + trf*is_ell
-            + trf*has_disability
-            + trf*is_disadvantaged
+            ~ Transformer
+            + Transformer*race
+            # + Transformer*is_ell
+            + Transformer*has_disability
+            + Transformer*is_disadvantaged
             + (1 | essay_id),
             REML = FALSE,
             data=dfp
             )
 
 fit.ell <- lmer(pred_error
-            ~ trf
-            + trf*race
-            + trf*is_ell
-            + trf*has_disability
-            + trf*is_disadvantaged
+            ~ Transformer
+            + Transformer*race
+            + Transformer*is_ell
+            + Transformer*has_disability
+            + Transformer*is_disadvantaged
             + (1 | essay_id),
             REML = FALSE,
             data=dfp
@@ -266,9 +265,9 @@ fit.ell <- lmer(pred_error
 ```
 ## RMSE
 
-RMSE is more interpretable. Possibly a separate research questioN?
+RMSE is more interpretable. Possibly a separate research question?
 
-```{r}
+```{r, eval=FALSE}
 fit.rmse <- lmer(rmse
             ~ Transformer
             + Transformer*race_ethnicity
