@@ -18,6 +18,7 @@ library(emmeans) # marginal means; interaction plots
 library(performance) # quick ICC, AIC, etc.
 library(tidyverse) # dyplr, forcats, ggplot2
 library(ggthemes) # color palette for 15+ classes
+library(Hmisc) # mean_cl_boot for ggplot stat_summary
 
 df <- read.csv("../data/persuade_corpus.csv",
                na.strings = c("", " ", "NA")) %>% 
@@ -64,6 +65,76 @@ contrasts(df$source) = contr.Sum(levels(df$source))
 
 summary(df)
 ```
+## Visualize the Data
+
+```{r, fig.height=8}
+# df %>%
+#   summarize(
+#     Score = mean(holistic_score_adjudicated),
+#     SD.Score = sd(holistic_score_adjudicated),
+#     N = n(),
+#     ELLs = sum(as.numeric(is_ell)),
+#     Disability = sum(as.numeric(has_disability)),
+#     Disadvantaged = sum(as.numeric(is_disadvantaged)),
+#     .by=c(prompt_name, grade)
+#     ) %>%
+#   arrange(prompt_name, grade) %>%
+#   print()
+
+mean_cl_boot_h <- function(x) {
+  triplet <- mean_cl_boot(x)
+  # triplet$ymin <- x - triplet$ymin
+  names(triplet) <- c("y", "xmin", "xmax")
+  return (triplet)
+}
+
+df %>%
+  add_count(grade, prompt_name, name="grade_prompt_n") %>%  
+  add_count(grade, name="grade_n") %>% 
+  add_count(prompt_name, name="prompt_n") %>%
+  ggplot(aes(x=factor(grade), y=holistic_score_adjudicated, group=prompt_name, color=prompt_name)) +
+    # geom_violin(scale = "count",
+    #             linewidth=0.75,
+    #             position=position_dodge(width=0.75, preserve="total")) +
+    # geom_point(aes(size=length),
+    #            linewidth=0.75,
+    #            position=position_dodge(width=0.75)) +
+    geom_count(aes(shape=task), 
+               alpha=0.5,
+               position=position_dodge(width=0.75)) +
+    stat_summary(fun=mean,
+                 geom="line",
+                 linewidth=1,
+                 alpha=0.5,
+                 lineend="butt",
+                 linejoin="round",
+                 position=position_dodge(width=0.75, preserve="total"),
+                 aes(group=prompt_name, color=prompt_name)) +
+    stat_summary(fun.data = "mean_cl_boot",
+                 geom = "crossbar",
+                 alpha=1,
+                 # linewidth=1,
+                 position=position_dodge(width=0.75)) +
+    # stat_summary(fun=mean,
+    #              geom="point",
+    #              size=1.2,
+    #              alpha=1,
+    #              position=position_dodge(width=0.75)) +
+    scale_size(range=c(1,10)) +
+    guides(
+         # size="none",
+         shape=guide_legend(title.position="top", title="Task", nrow=2),
+         size=guide_legend(title.position="top", title="Count", nrow=3),
+         color=guide_legend(title.position="top", title="Prompt", nrow=5)
+           ) +
+    labs(x="Grade", y="Holistic Score") +
+    theme_clean() +
+    scale_color_tableau(palette="Tableau 20") +
+    theme(legend.title.align=0.5,
+          legend.position = "bottom")
+# ggsave("../results/prompt_grade_violin.png")
+```
+
 
 ```{r}
 eval_model <- function(mod) {
@@ -84,7 +155,7 @@ eval_model(mod.null)
 ```
 
 
-# Simple model with just race
+## Simple model with just race
 
 ```{r}
 mod.race <-lmer(holistic_score_adjudicated
@@ -110,59 +181,6 @@ mod.all_fixed_effects <- lmer(holistic_score_adjudicated
                               data=df
                               )
 eval_model(mod.all_fixed_effects)
-```
-
-### Why is grade not a good predictor?
-
-```{r, fig.height=8}
-df %>%
-  summarize(
-    Score = mean(holistic_score_adjudicated),
-    SD.Score = sd(holistic_score_adjudicated),
-    N = n(),
-    ELLs = sum(as.numeric(is_ell)),
-    Disability = sum(as.numeric(has_disability)),
-    Disadvantaged = sum(as.numeric(is_disadvantaged)),
-    .by=c(prompt_name, grade)
-    ) %>%
-  arrange(prompt_name, grade) %>%
-  print()
-
-df %>%
-  add_count(grade, prompt_name, name="grade_prompt_n") %>%  
-  add_count(grade, name="grade_n") %>% 
-  add_count(prompt_name, name="prompt_n") %>%
-  ggplot(aes(x=factor(grade), y=holistic_score_adjudicated, color=prompt_name)) +
-    geom_violin(scale = "count",
-                linewidth=0.75,
-                position=position_dodge(width=0.75, preserve="total")) +
-    stat_summary(fun=mean,
-                 geom="line",
-                 linewidth=1,
-                 alpha=0.5,
-                 lineend="butt",
-                 linejoin="round",
-                 position=position_dodge(width=0.75, preserve="total"),
-                 aes(group=prompt_name)) +
-    stat_summary(fun=mean,
-                 geom="point",
-                 alpha=0.5,
-                 position=position_dodge(width=0.75, preserve="total"),
-                 aes(shape=task, size=grade_prompt_n, group=prompt_name, color=prompt_name)) +
-    scale_size(range=c(3,10)) +
-    guides(
-         # size="none",
-         shape=guide_legend(title.position="top", title="Task", nrow=2),
-         size=guide_legend(title.position="top", title="Count", nrow=4),
-         color=guide_legend(title.position="top", title="Prompt", nrow=5)
-           ) +
-    labs(x="Grade", y="Holistic Score") +
-    theme_clean() +
-    scale_color_tableau(palette="Tableau 20") +
-    theme(legend.title.align=0.5,
-          legend.position = "bottom")
-
-ggsave("../results/prompt_grade_violin.png")
 ```
 
 
