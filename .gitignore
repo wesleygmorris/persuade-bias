@@ -6,3 +6,7 @@ renv/
 .Rprofile
 *.Rproj
 .Rproj.user
+src/logs
+.RData
+.Rhistory
+results/
