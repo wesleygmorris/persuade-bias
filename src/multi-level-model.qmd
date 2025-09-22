@@ -34,10 +34,10 @@ dfp <- read.csv("../data/persuade-predictions-long.csv",
   # simplify level and variable names
   mutate(
     Transformer=fct_recode(model,
-                   Black="baa_pred",
-                   Control="control_pred",
-                   Hispanic="hl_pred",
-                   White="w_pred"),
+                   control="control_pred",
+                   black="baa_pred",
+                   hispanic="hl_pred",
+                   white="w_pred"),
     race=fct_recode(race_ethnicity,
                     asian="Asian/Pacific Islander",
                     black="Black/African American", 
@@ -46,8 +46,8 @@ dfp <- read.csv("../data/persuade-predictions-long.csv",
                     white="White")
     ) %>% 
   
-  # calculate root mean squared error
-  mutate(rmse=sqrt(squared_error)) %>%
+  # calculate root mean absolute error
+  mutate(mae=abs(pred_error)) %>%
   
   # calculate percent error
   mutate(percent_error = (pred_error/holistic_score_adjudicated)*100) %>% 
@@ -69,9 +69,10 @@ dfp <- read.csv("../data/persuade-predictions-long.csv",
   
   # set the first level, which will be used as "reference"
   mutate(
+    is_ell=fct_relevel(is_ell, "No"),
     is_disadvantaged=fct_relevel(is_disadvantaged, "No"),
     has_disability=fct_relevel(has_disability, "No"),
-    Transformer=fct_relevel(Transformer, "Control")
+    Transformer=fct_relevel(Transformer, "control")
   ) %>% 
   
   mutate(
@@ -95,8 +96,8 @@ summary(dfp)
 
 ```{r}
 dfp %>%
-  filter(Transformer == "Control") %>%
-  summarize(
+  filter(Transformer == "control") %>%
+  summarise(
     Score = mean(holistic_score_adjudicated),
     N = n(),
     ELLs = sum(as.numeric(is_ell)),
@@ -116,7 +117,7 @@ dfp %>%
 Just adding in transformer model as a predictor and a random intercept for essay ID. This model has poor fit, with many useless parameters. Prompt_name is no longer useful as a grouping variable, so we can drop it.
 
 ```{r, eval=FALSE}
-mod.rq1 <- lmer(pred_error 
+mod.rq1 <- lmer(mae 
                 ~ Transformer
                 + gender
                 + race*is_ell
@@ -140,8 +141,8 @@ fit.min <- lmer(pred_error
             # + race # increases AIC
             # + source # increases AIC
             # + is_disadvantaged # increases AIC
-            + is_ell
-            + has_disability
+            # + is_ell # increases AIC
+            # + has_disability # increases AIC
             # + gender # increases AIC
             # + race*is_disadvantaged # increases AIC
             # + race*is_ell # increases AIC
@@ -155,6 +156,7 @@ fit.min <- lmer(pred_error
             # + gender*has_disability # increases AIC
             # + gender*is_disadvantaged # increases AIC
             # + gender*is_ell # small decrease (-1) to AIC
+            # + (1 | prompt_name) # small decrese (-30) to AIC
             + (1 | essay_id),
             data=dfp
             )
@@ -167,7 +169,7 @@ tab_model(fit.min, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.a
 While race did not help model fit on its own, its interaction with transformer model substantially improves model fit. The same pattern holds for interactions between transformer model and other demographic variables.
 
 ```{r}
-fit <- lmer(pred_error
+fit <- lmer(mae
             ~ Transformer
             + Transformer*race
             + Transformer*is_ell
@@ -178,9 +180,117 @@ fit <- lmer(pred_error
             data=dfp
             )
 
-tab_model(fit, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
+tab_model(fit, show.aic=TRUE,
+          prefix.labels="varname",
+          p.adjust = "BH")
 
 ```
+
+## Extract Deviance Coded Estimates
+
+```{r}
+# Function to extract reference level statistics for race and transformer interactions
+get_reference_stats <- function(model) {
+  # Get fixed effects and variance-covariance matrix
+  fe <- fixef(model)
+  vcov_matrix <- vcov(model)
+  
+  # Extract main race effects (excluding interactions)
+  race_indices <- grep("^race\\[", names(fe))
+  race_coefs <- fe[race_indices]
+  
+  # Calculate main effect for white (reference level)
+  white_coef <- -sum(race_coefs)
+  
+  # Get variance terms for main race effects
+  race_vcov <- vcov_matrix[race_indices, race_indices]
+
+  white_var <- sum(race_vcov)
+  white_se <- sqrt(white_var)
+
+  # Calculate statistics for main white effect
+  df <- df.residual(model)
+  white_t <- white_coef / white_se
+  white_p <- 2 * pt(abs(white_t), df = df, lower.tail = FALSE)
+  
+  # Get transformer interaction effects for each transformer
+  transformers <- c("black", "hispanic", "white")
+  interaction_stats <- list()
+  
+  for(trans in transformers) {
+    # Get indices for this transformer's race interactions
+    trans_pattern <- paste0("Transformer", trans, ":race\\[")
+    trans_indices <- grep(trans_pattern, names(fe))
+    trans_coefs <- fe[trans_indices]
+    
+    # Calculate reference level coefficient
+    trans_white_coef <- -sum(trans_coefs)
+    
+    # Get variance terms for this transformer's interactions
+    trans_vcov <- vcov_matrix[trans_indices, trans_indices]
+    trans_white_var <- sum(trans_vcov)
+    trans_white_se <- sqrt(trans_white_var)
+    
+    # Calculate statistics
+    trans_white_t <- trans_white_coef / trans_white_se
+    trans_white_p <- 2 * pt(abs(trans_white_t), df = df, lower.tail = FALSE)
+    
+    # Store results
+    interaction_stats[[trans]] <- list(
+      coefficient = trans_white_coef,
+      std_error = trans_white_se,
+      t_value = trans_white_t,
+      p_value = trans_white_p
+    )
+  }
+  
+  # Return all results
+  return(list(
+    main_effect = list(
+      coefficient = white_coef,
+      std_error = white_se,
+      t_value = white_t,
+      p_value = white_p
+    ),
+    transformer_interactions = interaction_stats
+  ))
+}
+
+
+# Helper function to format results into a data frame
+format_results <- function(stats) {
+  # Create data frame for main effect
+  main_df <- data.frame(
+    Effect = "Main effect (White)",
+    Coefficient = stats$main_effect$coefficient,
+    SE = stats$main_effect$std_error,
+    t_value = stats$main_effect$t_value,
+    p_value = stats$main_effect$p_value
+  )
+  
+  # Create data frame for interaction effects
+  interaction_df <- do.call(rbind, lapply(names(stats$transformer_interactions), function(trans) {
+    res <- stats$transformer_interactions[[trans]]
+    data.frame(
+      Effect = paste0("Transformer[", trans, "]", " x race[white]"),
+      Coefficient = res$coefficient,
+      SE = res$std_error,
+      t_value = res$t_value,
+      p_value = res$p_value
+    )
+  }))
+  
+  # Combine and return
+  results_df <- rbind(main_df, interaction_df)
+  rownames(results_df) <- NULL
+  return(results_df)
+}
+
+stats <- get_reference_stats(fit)
+results_table <- format_results(stats)
+print(results_table)
+```
+
 
 ## Save Table
 
@@ -234,72 +344,60 @@ tab_model(fit,
           file = "../results/RQ2.html")
 ```
 
-## Deviance Tests
-
-These require non-restricted ML estimations.
-
-```{r}
-fit.ml <- lmer(pred_error
-            ~ Transformer
-            + Transformer*race
-            # + Transformer*is_ell
-            + Transformer*has_disability
-            + Transformer*is_disadvantaged
-            + (1 | essay_id),
-            REML = FALSE,
-            data=dfp
-            )
-
-fit.ell <- lmer(pred_error
-            ~ Transformer
-            + Transformer*race
-            + Transformer*is_ell
-            + Transformer*has_disability
-            + Transformer*is_disadvantaged
-            + (1 | essay_id),
-            REML = FALSE,
-            data=dfp
-            )
-
-1-pchisq(deviance(fit.ml) - deviance(fit.ell), df=2)
-```
-## RMSE
-
-RMSE is more interpretable. Possibly a separate research question?
-
-```{r, eval=FALSE}
-fit.rmse <- lmer(rmse
-            ~ Transformer
-            + Transformer*race_ethnicity
-            + Transformer*is_ell
-            # + Transformer*has_disability
-            + Transformer*is_disadvantaged
-            + (1 | essay_id),
-            REML = TRUE,
-            data=dfp
-            )
-
-tab_model(fit.rmse, show.aic=TRUE, show.reflvl=TRUE, prefix.labels="varname", p.adjust = "BH")
-
-```
-
-
 ## Interaction Plots
 
 ```{r}
-# c("Asian/Pacific Islander",
-#   "Black/African American",
-#                "Hispanic/Latino",
-#                "Two or more races/Other",
-#                "White")
 
-emmip(fit, race_ethnicity ~ Transformer,
-      mode="asymp",
+plot_interaction <- function(formula, color_name, color_labels) {
+  emmip(
+      fit,
+      formula=formula,
+      mode = "asymp",
       type = "scale",
       style = "factor",
       tlab = "Race/Ethnicity",
       ylab = "Prediction Error",
-      xlab = "Data used to Train Automatic Scoring System"
-)
-# ggsave("../results/transformer_race.png")
+      xlab = "Data used to Train LLM") +
+    scale_color_discrete(
+      name = color_name,
+      labels = color_labels) +
+    scale_x_discrete(
+      labels = c("control" = "Balanced",
+                 "black" = "Black-Only",
+                 "hispanic" = "Hispanic-only",
+                 "white" = "White-only")) +
+    theme_bw() +
+    theme(
+      legend.position = "right",
+      legend.title = element_text(size = 10, face = "bold"),
+      legend.text = element_text(size = 9),
+      axis.title = element_text(size = 10, face = "bold"),
+      axis.text = element_text(size = 9),
+      axis.text.x = element_text(angle = 0, hjust = 0.5)
+    )
+  # if save_path
+  # ggsave("../results/transformer_race.png", width = 8, height = 6, dpi = 300)
+}
+
+plot_interaction(formula(race ~ Transformer),
+                 "Race/Ethnicity",
+                 c("Asian/Pacific Islander",
+                   "Black/African American",
+                   "Hispanic/Latino",
+                   "Two or more races/Other",
+                   "White"))
+
+plot_interaction(formula(is_ell ~ Transformer),
+                 "ELL Status",
+                 c("No", "Yes"))
+
+plot_interaction(formula(has_disability ~ Transformer),
+                 "Disability",
+                 c("No", "Yes"))
+
+plot_interaction(formula(is_disadvantaged ~ Transformer),
+                 "Economic Disadvantage",
+                 c("No", "Yes"))
 ```
+
+
