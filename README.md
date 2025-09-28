@@ -4,4 +4,4 @@
 
 # PERSUADE Corpus
 
-Please see the following repository for guidance on obtaining the PERSUADE corpus: [scrosseye/persuade_corpus_2.0](https://github.com/scrosseye/persuade_corpus_2.0).
+Please see the following repository for guidance on obtaining the PERSUADE corpus: [scrosseye/PERSUADE_corpus](https://github.com/scrosseye/PERSUADE_corpus).
